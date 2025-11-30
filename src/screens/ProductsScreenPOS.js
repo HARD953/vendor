@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,14 +19,28 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COLORS } from '../styles/colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 
-const { width } = Dimensions.get('window');
+// Couleurs
+const COLORS = {
+  primary: '#667eea',
+  secondary: '#764ba2',
+  accent: '#f093fb',
+  success: '#4CAF50',
+  warning: '#FF9800',
+  error: '#F44336',
+  background: '#f8f9fa',
+  surface: '#FFFFFF',
+  text: '#2D3748',
+  textLight: '#718096',
+  border: '#E2E8F0'
+};
+
+const { width, height } = Dimensions.get('window');
 const API_BASE_URL = 'https://api.pushtrack360.com/api';
 
-export default function ProductsScreen() {
+export default function ProductsScreenPOS() {
   const [activities, setActivities] = useState([]);
   const [summary, setSummary] = useState({ 
     total_products: 0, 
@@ -47,7 +61,6 @@ export default function ProductsScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [totalAmount, setTotalAmount] = useState(0);
-  const [fadeAnim] = useState(new Animated.Value(0));
   const [activeTab, setActiveTab] = useState('all');
   const [searchProductQuery, setSearchProductQuery] = useState('');
   const [selectedVendorActivity, setSelectedVendorActivity] = useState(null);
@@ -55,21 +68,22 @@ export default function ProductsScreen() {
   const [locationLoading, setLocationLoading] = useState(false);
   const [saleProcessing, setSaleProcessing] = useState(false);
 
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const headerScrollAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     loadData();
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 600,
-      easing: Easing.out(Easing.ease),
-      useNativeDriver: true
-    }).start();
+    animateEntrance();
   }, []);
 
   useEffect(() => {
     if (selectedProduct && saleQuantity) {
       const qty = parseInt(saleQuantity);
       if (!isNaN(qty) && qty > 0) {
-        const price = parseFloat(selectedProduct.product_variant.price);
+        const price = parseFloat(selectedProduct.product_variant?.price || 0);
         setTotalAmount(qty * price);
       } else {
         setTotalAmount(0);
@@ -84,13 +98,36 @@ export default function ProductsScreen() {
       setFilteredCustomers(customers);
     } else {
       const filtered = customers.filter(customer => 
-        customer.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        customer.zone.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        customer.phone.includes(searchQuery)
+        customer?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        customer?.zone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        customer?.phone?.includes(searchQuery)
       );
       setFilteredCustomers(filtered);
     }
   }, [searchQuery, customers]);
+
+  const animateEntrance = () => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 20,
+        friction: 7,
+        useNativeDriver: true,
+      })
+    ]).start();
+  };
 
   const getAuthHeader = async () => {
     const token = await AsyncStorage.getItem('accessToken');
@@ -100,12 +137,10 @@ export default function ProductsScreen() {
     };
   };
 
-  // Fonction pour récupérer la géolocalisation
   const getCurrentLocation = async () => {
     try {
       setLocationLoading(true);
       
-      // Vérifier les permissions
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(
@@ -115,16 +150,14 @@ export default function ProductsScreen() {
         return null;
       }
 
-      // Récupérer la position
       let location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+        accuracy: Location.Accuracy.High,
         timeout: 10000
       });
 
       const { latitude, longitude } = location.coords;
       setLocation({ latitude, longitude });
       
-      console.log('📍 Localisation récupérée:', { latitude, longitude });
       return { latitude, longitude };
     } catch (error) {
       console.log('Erreur de géolocalisation:', error);
@@ -161,9 +194,7 @@ export default function ProductsScreen() {
         headers
       });
       
-      if (!response.ok) {
-        throw new Error(`Erreur HTTP: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Erreur HTTP: ${response.status}`);
       
       const data = await response.json();
       setActivities(data);
@@ -192,13 +223,11 @@ export default function ProductsScreen() {
   const loadSalesSummary = async () => {
     try {
       const headers = await getAuthHeader();
-      const response = await fetch(`${API_BASE_URL}/sales/summary/`, {
+      const response = await fetch(`${API_BASE_URL}/salespos/summary/`, {
         headers
       });
       
-      if (!response.ok) {
-        throw new Error(`Erreur HTTP: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Erreur HTTP: ${response.status}`);
       
       const data = await response.json();
       
@@ -207,7 +236,7 @@ export default function ProductsScreen() {
         sold_amount: data.total_revenue || 0,
         sold_quantity: data.total_quantity_assigne || 0,
         remaining_products: data.total_quantite_restant || 0,
-        vendu: data.total_quantity_assigne - data.total_quantite_restant || 0,
+        vendu: (data.total_quantity_assigne || 0) - (data.total_quantite_restant || 0),
         remaining_amount: prev.total_amount - (data.total_revenue || 0)
       }));
     } catch (error) {
@@ -219,13 +248,11 @@ export default function ProductsScreen() {
   const loadCustomers = async () => {
     try {
       const headers = await getAuthHeader();
-      const response = await fetch(`${API_BASE_URL}/purchases/`, {
+      const response = await fetch(`${API_BASE_URL}/points-vente/`, {
         headers
       });
       
-      if (!response.ok) {
-        throw new Error(`Erreur HTTP: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Erreur HTTP: ${response.status}`);
       
       const data = await response.json();
       setCustomers(data);
@@ -243,14 +270,11 @@ export default function ProductsScreen() {
   };
 
   const getAvailableStock = (product) => {
-    if (!product || !product.product_variant) return 0;
+    if (!product?.product_variant) return 0;
     
     const vendorActivity = activities.find(activity => 
-      activity && 
-      activity.order_items && 
-      Array.isArray(activity.order_items) &&
-      activity.order_items.some(item => 
-        item && item.product_variant && item.product_variant.id === product.product_variant.id
+      activity?.order_items?.some(item => 
+        item?.product_variant?.id === product.product_variant.id
       )
     );
     
@@ -268,7 +292,7 @@ export default function ProductsScreen() {
     }
     
     const vendorActivity = activities.find(activity => 
-      activity.order_items.some(item => item.product_variant.id === product.product_variant.id)
+      activity.order_items?.some(item => item.product_variant?.id === product.product_variant?.id)
     );
     
     setSelectedProduct(product);
@@ -307,7 +331,6 @@ export default function ProductsScreen() {
     try {
       setSaleProcessing(true);
       
-      // Récupérer la géolocalisation avant d'envoyer la vente
       const locationData = await getCurrentLocation();
       
       const saleData = {
@@ -318,14 +341,13 @@ export default function ProductsScreen() {
         vendor_activity: selectedVendorActivity.id
       };
 
-      // Ajouter les coordonnées GPS si disponibles
       if (locationData) {
         saleData.latitude = locationData.latitude;
         saleData.longitude = locationData.longitude;
       }
 
       const headers = await getAuthHeader();
-      const response = await fetch(`${API_BASE_URL}/sales/`, {
+      const response = await fetch(`${API_BASE_URL}/salespos/`, {
         method: 'POST',
         headers: {
           ...headers,
@@ -335,7 +357,6 @@ export default function ProductsScreen() {
       });
 
       if (response.ok) {
-        const result = await response.json();
         Alert.alert(
           '✅ Vente enregistrée', 
           `${qty} unité(s) vendue(s) à ${selectedCustomer.full_name}\nMontant: ${formatPrice(totalAmount)}`,
@@ -346,7 +367,6 @@ export default function ProductsScreen() {
         );
       } else {
         const errorData = await response.json();
-        console.log('Erreur détaillée:', errorData);
         Alert.alert('Erreur', errorData.message || 'Échec de l\'enregistrement de la vente');
       }
     } catch (error) {
@@ -365,7 +385,7 @@ export default function ProductsScreen() {
   };
 
   const getStockStatus = (product) => {
-    if (!product || !product.product_variant) {
+    if (!product?.product_variant) {
       return { status: 'Inconnu', color: '#ccc', icon: 'help-circle', priority: 4 };
     }
     
@@ -381,40 +401,32 @@ export default function ProductsScreen() {
   const getFilteredProducts = () => {
     let allProducts = [];
     
-    if (activities && Array.isArray(activities)) {
-      activities.forEach(activity => {
-        if (activity && activity.order_items && Array.isArray(activity.order_items)) {
-          activity.order_items.forEach(item => {
-            if (item && item.product_variant && item.product_variant.id) {
-              const existingProduct = allProducts.find(p => 
-                p.product_variant && p.product_variant.id === item.product_variant.id
-              );
-              if (!existingProduct) {
-                allProducts.push(item);
-              }
+    activities.forEach(activity => {
+      if (activity?.order_items) {
+        activity.order_items.forEach(item => {
+          if (item?.product_variant?.id) {
+            const existingProduct = allProducts.find(p => 
+              p.product_variant?.id === item.product_variant.id
+            );
+            if (!existingProduct) {
+              allProducts.push(item);
             }
-          });
-        }
-      });
-    }
+          }
+        });
+      }
+    });
     
     if (searchProductQuery.trim() !== '') {
       allProducts = allProducts.filter(product => 
-        product && 
-        product.product_name && 
-        product.product_variant &&
-        product.product_variant.product &&
-        (
-          product.product_name.toLowerCase().includes(searchProductQuery.toLowerCase()) ||
-          product.product_variant.product.sku.toLowerCase().includes(searchProductQuery.toLowerCase())
-        )
+        product?.product_name?.toLowerCase().includes(searchProductQuery.toLowerCase()) ||
+        product?.product_variant?.product?.sku?.toLowerCase().includes(searchProductQuery.toLowerCase())
       );
     }
 
     if (activeTab !== 'all') {
       allProducts = allProducts.filter(product => {
         const status = getStockStatus(product);
-        return status && (
+        return (
           (activeTab === 'low' && status.priority <= 1) ||
           (activeTab === 'medium' && status.priority === 2) ||
           (activeTab === 'good' && status.priority === 3)
@@ -432,10 +444,10 @@ export default function ProductsScreen() {
   const getProductSections = () => {
     const products = getFilteredProducts();
     const sections = [
-      { title: 'Stock Critique', data: [], color: '#ff4757' },
-      { title: 'Stock Faible', data: [], color: '#ff9f43' },
-      { title: 'Stock Moyen', data: [], color: '#2e86de' },
-      { title: 'Stock Bon', data: [], color: '#10ac84' }
+      { title: 'Stock Critique', data: [], color: '#ff4757', icon: 'close-circle' },
+      { title: 'Stock Faible', data: [], color: '#ff9f43', icon: 'warning' },
+      { title: 'Stock Moyen', data: [], color: '#2e86de', icon: 'alert-circle' },
+      { title: 'Stock Bon', data: [], color: '#10ac84', icon: 'checkmark-circle' }
     ];
 
     products.forEach(product => {
@@ -453,7 +465,7 @@ export default function ProductsScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Chargement des données...</Text>
+        <Text style={styles.loadingText}>Chargement des produits...</Text>
       </View>
     );
   }
@@ -462,35 +474,52 @@ export default function ProductsScreen() {
   const productSections = getProductSections();
 
   return (
-    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
-      {/* Header avec recherche */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Text style={styles.headerTitle}>Inventaire Produits</Text>
-          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-            <Ionicons name="refresh" size={24} color={COLORS.primary} />
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.headerSubtitle}>Gestion de votre inventaire en temps réel</Text>
-        
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color={COLORS.textLight} style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Rechercher un produit..."
-            value={searchProductQuery}
-            onChangeText={setSearchProductQuery}
-            placeholderTextColor={COLORS.textLight}
-          />
-          {searchProductQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchProductQuery('')} style={styles.clearSearchButton}>
-              <Ionicons name="close-circle" size={20} color={COLORS.textLight} />
+    <View style={styles.container}>
+      {/* Header avec dégradé */}
+      <Animated.View 
+        style={[
+          styles.header,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }]
+          }
+        ]}
+      >
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          style={styles.headerGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={styles.headerContent}>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>📦 Inventaire</Text>
+              <Text style={styles.headerSubtitle}>Gestion de votre stock en temps réel</Text>
+            </View>
+            <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
+              <Ionicons name="refresh" size={24} color="#FFF" />
             </TouchableOpacity>
-          )}
-        </View>
-      </View>
+          </View>
 
-      {/* Statistiques générales */}
+          {/* Barre de recherche */}
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="rgba(255,255,255,0.7)" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Rechercher un produit..."
+              placeholderTextColor="rgba(255,255,255,0.7)"
+              value={searchProductQuery}
+              onChangeText={setSearchProductQuery}
+            />
+            {searchProductQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchProductQuery('')}>
+                <Ionicons name="close-circle" size={20} color="rgba(255,255,255,0.7)" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </LinearGradient>
+      </Animated.View>
+
       <ScrollView
         style={styles.scrollView}
         refreshControl={
@@ -503,95 +532,118 @@ export default function ProductsScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.statsContainer}>
-          <LinearGradient
-            colors={['#667eea', '#764ba2']}
-            style={styles.statsCard}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <View style={styles.statsHeader}>
-              <Ionicons name="analytics" size={24} color="#fff" />
-              <Text style={styles.statsTitle}>Aperçu du Stock</Text>
+        {/* Cartes de statistiques */}
+        <Animated.View 
+          style={[
+            styles.statsContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }]
+            }
+          ]}
+        >
+          <View style={styles.statsGrid}>
+            <View style={[styles.statCard, styles.totalCard]}>
+              <View style={styles.statIconContainer}>
+                <Ionicons name="cube" size={24} color="#667eea" />
+              </View>
+              <Text style={styles.statNumber}>{summary.sold_quantity}</Text>
+              <Text style={styles.statLabel}>Total Stock</Text>
             </View>
-            
-            <View style={styles.statsGrid}>
-              <View style={styles.statCircle}>
-                <Text style={styles.statCircleNumber}>{summary.sold_quantity}</Text>
-                <Text style={styles.statsCircleLabel}>Total</Text>
-              </View>
-              
-              <View style={styles.statCircle}>
-                <Text style={[styles.statCircleNumber, { color: '#10ac84' }]}>{summary.vendu}</Text>
-                <Text style={styles.statsCircleLabel}>Vendus</Text>
-              </View>
-              
-              <View style={styles.statCircle}>
-                <Text style={[styles.statCircleNumber, { color: '#ff9f43' }]}>{summary.remaining_products}</Text>
-                <Text style={styles.statsCircleLabel}>Restants</Text>
-              </View>
-            </View>
-            
-            <View style={styles.amountSummary}>
-              <View style={styles.amountRow}>
-                <Text style={styles.amountLabel}>Valeur totale:</Text>
-                <Text style={styles.amountValue}>{formatPrice(summary.sold_amount)}</Text>
-              </View>
-              <View style={styles.progressBar}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    {
-                      width: `${summary.sold_quantity > 0 ? (summary.vendu / summary.sold_quantity) * 100 : 0}%`,
-                      backgroundColor: '#10ac84',
-                    }
-                  ]}
-                />
-              </View>
-              <View style={styles.progressLabels}>
-                <Text style={styles.progressText}>
-                  Taux de vente: {summary.sold_quantity > 0 ? Math.round((summary.vendu / summary.sold_quantity) * 100) : 0}%
-                </Text>
-              </View>
-            </View>
-          </LinearGradient>
-        </View>
 
-        {/* Filtres par statut de stock */}
-        <View style={styles.filterContainer}>
+            <View style={[styles.statCard, styles.soldCard]}>
+              <View style={styles.statIconContainer}>
+                <Ionicons name="trending-up" size={24} color="#10ac84" />
+              </View>
+              <Text style={styles.statNumber}>{summary.vendu}</Text>
+              <Text style={styles.statLabel}>Vendus</Text>
+            </View>
+
+            <View style={[styles.statCard, styles.remainingCard]}>
+              <View style={styles.statIconContainer}>
+                <Ionicons name="time" size={24} color="#ff9f43" />
+              </View>
+              <Text style={styles.statNumber}>{summary.remaining_products}</Text>
+              <Text style={styles.statLabel}>Restants</Text>
+            </View>
+          </View>
+
+          {/* Carte de performance */}
+          <View style={styles.performanceCard}>
+            <View style={styles.performanceHeader}>
+              <Text style={styles.performanceTitle}>Performance des ventes</Text>
+              <Text style={styles.performanceValue}>
+                {summary.sold_quantity > 0 ? Math.round((summary.vendu / summary.sold_quantity) * 100) : 0}%
+              </Text>
+            </View>
+            <View style={styles.progressBar}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${summary.sold_quantity > 0 ? (summary.vendu / summary.sold_quantity) * 100 : 0}%`,
+                  }
+                ]}
+              />
+            </View>
+            <View style={styles.performanceFooter}>
+              <Text style={styles.performanceAmount}>{formatPrice(summary.sold_amount)}</Text>
+              <Text style={styles.performanceLabel}>Chiffre d'affaires</Text>
+            </View>
+          </View>
+        </Animated.View>
+
+        {/* Filtres par statut */}
+        <Animated.View 
+          style={[
+            styles.filterSection,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }]
+            }
+          ]}
+        >
+          <Text style={styles.sectionTitle}>Filtrer par statut</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-            <TouchableOpacity 
-              style={[styles.filterButton, activeTab === 'all' && styles.filterButtonActive]}
-              onPress={() => setActiveTab('all')}
-            >
-              <Text style={[styles.filterText, activeTab === 'all' && styles.filterTextActive]}>Tous</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.filterButton, activeTab === 'low' && styles.filterButtonActive]}
-              onPress={() => setActiveTab('low')}
-            >
-              <Ionicons name="warning" size={16} color={activeTab === 'low' ? '#fff' : '#ff9f43'} />
-              <Text style={[styles.filterText, activeTab === 'low' && styles.filterTextActive]}>Faible</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.filterButton, activeTab === 'medium' && styles.filterButtonActive]}
-              onPress={() => setActiveTab('medium')}
-            >
-              <Ionicons name="alert-circle" size={16} color={activeTab === 'medium' ? '#fff' : '#2e86de'} />
-              <Text style={[styles.filterText, activeTab === 'medium' && styles.filterTextActive]}>Moyen</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.filterButton, activeTab === 'good' && styles.filterButtonActive]}
-              onPress={() => setActiveTab('good')}
-            >
-              <Ionicons name="checkmark-circle" size={16} color={activeTab === 'good' ? '#fff' : '#10ac84'} />
-              <Text style={[styles.filterText, activeTab === 'good' && styles.filterTextActive]}>Bon</Text>
-            </TouchableOpacity>
+            {[
+              { key: 'all', label: 'Tous', icon: 'grid' },
+              { key: 'low', label: 'Faible', icon: 'warning', color: '#ff9f43' },
+              { key: 'medium', label: 'Moyen', icon: 'alert-circle', color: '#2e86de' },
+              { key: 'good', label: 'Bon', icon: 'checkmark-circle', color: '#10ac84' }
+            ].map((filter) => (
+              <TouchableOpacity 
+                key={filter.key}
+                style={[
+                  styles.filterButton,
+                  activeTab === filter.key && [styles.filterButtonActive, { backgroundColor: filter.color || COLORS.primary }]
+                ]}
+                onPress={() => setActiveTab(filter.key)}
+              >
+                <Ionicons 
+                  name={filter.icon} 
+                  size={18} 
+                  color={activeTab === filter.key ? '#FFF' : (filter.color || COLORS.textLight)} 
+                />
+                <Text style={[
+                  styles.filterText,
+                  activeTab === filter.key && styles.filterTextActive
+                ]}>
+                  {filter.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </ScrollView>
-        </View>
+        </Animated.View>
 
         {/* Liste des produits */}
-        <View style={styles.productsSection}>
+        <Animated.View 
+          style={[
+            styles.productsSection,
+            {
+              opacity: fadeAnim,
+            }
+          ]}
+        >
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Produits ({filteredProducts.length})</Text>
             <Text style={styles.sectionSubtitle}>Classés par niveau de stock</Text>
@@ -600,7 +652,7 @@ export default function ProductsScreen() {
           {filteredProducts.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="search-outline" size={64} color="#e0e0e0" />
-              <Text style={styles.emptyStateText}>Aucun produit trouvé</Text>
+              <Text style={styles.emptyStateTitle}>Aucun produit trouvé</Text>
               <Text style={styles.emptyStateSubtext}>Ajustez vos filtres ou votre recherche</Text>
             </View>
           ) : (
@@ -608,63 +660,86 @@ export default function ProductsScreen() {
               sections={productSections}
               keyExtractor={(item) => item.product_variant.id.toString()}
               renderSectionHeader={({ section }) => (
-                <View style={[styles.sectionHeader, { backgroundColor: section.color + '20' }]}>
-                  <View style={[styles.sectionIndicator, { backgroundColor: section.color }]} />
-                  <Text style={[styles.sectionHeaderText, { color: section.color }]}>{section.title}</Text>
-                  <Text style={styles.sectionCount}>{section.data.length}</Text>
+                <View style={[styles.sectionHeaderCard, { borderLeftColor: section.color }]}>
+                  <View style={styles.sectionHeaderContent}>
+                    <Ionicons name={section.icon} size={20} color={section.color} />
+                    <Text style={[styles.sectionHeaderText, { color: section.color }]}>
+                      {section.title}
+                    </Text>
+                    <View style={[styles.sectionCountBadge, { backgroundColor: section.color }]}>
+                      <Text style={styles.sectionCountText}>{section.data.length}</Text>
+                    </View>
+                  </View>
                 </View>
               )}
-              renderItem={({ item: product, index, section }) => {
+              renderItem={({ item: product }) => {
                 const stockInfo = getStockStatus(product);
                 const remaining = getAvailableStock(product);
                 const progressPercentage = Math.min(100, (remaining / (product.product_variant.max_stock || 100)) * 100);
                 
                 return (
                   <TouchableOpacity
-                    style={styles.productItem}
+                    style={styles.productCard}
                     onPress={() => handleSalePress(product)}
-                    activeOpacity={0.7}
+                    activeOpacity={0.8}
                   >
-                    <View style={styles.productImageContainer}>
-                      {product.product_variant.image ? (
-                        <Image 
-                          source={{ uri: product.product_variant.image }} 
-                          style={styles.productImage}
-                          resizeMode="cover"
-                        />
-                      ) : (
-                        <View style={styles.productImagePlaceholder}>
-                          <Ionicons name="cube" size={24} color="#ccc" />
-                        </View>
-                      )}
-                    </View>
-                    
-                    <View style={styles.productContent}>
-                      <View style={styles.productHeader}>
-                        <Text style={styles.productName} numberOfLines={1}>{product.product_name}</Text>
-                        <Text style={styles.productPrice}>{formatPrice(product.product_variant.price)}</Text>
+                    <View style={styles.productHeader}>
+                      <View style={styles.productImageContainer}>
+                        {product.product_variant.image ? (
+                          <Image 
+                            source={{ uri: product.product_variant.image }} 
+                            style={styles.productImage}
+                          />
+                        ) : (
+                          <View style={styles.productImagePlaceholder}>
+                            <Ionicons name="cube" size={24} color="#ccc" />
+                          </View>
+                        )}
                       </View>
                       
-                      <Text style={styles.productFormat}>{product.product_variant.format.name}</Text>
-                      <Text style={styles.productSku}>SKU: {product.product_variant.product.sku}</Text>
+                      <View style={styles.productInfo}>
+                        <Text style={styles.productName} numberOfLines={2}>
+                          {product.product_name}
+                        </Text>
+                        <Text style={styles.productSku}>
+                          SKU: {product.product_variant.product.sku}
+                        </Text>
+                        <Text style={styles.productFormat}>
+                          {product.product_variant.format.name}
+                        </Text>
+                      </View>
                       
-                      <View style={styles.stockInfoRow}>
-                        <View style={styles.stockStats}>
-                          <View style={styles.stockStat}>
-                            <Text style={styles.stockLabel}>Min:</Text>
-                            <Text style={styles.stockValue}>{product.product_variant.min_stock}</Text>
-                          </View>
-                          <View style={styles.stockStat}>
-                            <Text style={styles.stockLabel}>Restant:</Text>
-                            <Text style={[styles.stockValue, { color: stockInfo.color }]}>
-                              {remaining}
-                            </Text>
-                          </View>
+                      <View style={styles.productPriceContainer}>
+                        <Text style={styles.productPrice}>
+                          {formatPrice(product.product_variant.price)}
+                        </Text>
+                        <TouchableOpacity 
+                          style={[styles.saleButton, remaining === 0 && styles.saleButtonDisabled]}
+                          onPress={() => handleSalePress(product)}
+                          disabled={remaining === 0}
+                        >
+                          <Ionicons 
+                            name="cart" 
+                            size={20} 
+                            color={remaining === 0 ? "#ccc" : "#FFF"} 
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View style={styles.productFooter}>
+                      <View style={styles.stockInfo}>
+                        <View style={styles.stockStat}>
+                          <Text style={styles.stockLabel}>Stock restant:</Text>
+                          <Text style={[styles.stockValue, { color: stockInfo.color }]}>
+                            {remaining} unités
+                          </Text>
                         </View>
-                        
                         <View style={[styles.statusBadge, { backgroundColor: stockInfo.color + '20' }]}>
                           <Ionicons name={stockInfo.icon} size={14} color={stockInfo.color} />
-                          <Text style={[styles.statusText, { color: stockInfo.color }]}>{stockInfo.status}</Text>
+                          <Text style={[styles.statusText, { color: stockInfo.color }]}>
+                            {stockInfo.status}
+                          </Text>
                         </View>
                       </View>
                       
@@ -683,22 +758,12 @@ export default function ProductsScreen() {
                         <Text style={styles.progressText}>{Math.round(progressPercentage)}%</Text>
                       </View>
                     </View>
-                    
-                    <View style={styles.productAction}>
-                      <TouchableOpacity 
-                        style={[styles.saleButton, remaining === 0 && styles.saleButtonDisabled]}
-                        onPress={() => handleSalePress(product)}
-                        disabled={remaining === 0}
-                      >
-                        <Ionicons name="cart" size={20} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
                   </TouchableOpacity>
                 );
               }}
             />
           )}
-        </View>
+        </Animated.View>
       </ScrollView>
 
       {/* Modal de vente */}
@@ -710,24 +775,27 @@ export default function ProductsScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Enregistrer une vente</Text>
+            <LinearGradient
+              colors={['#667eea', '#764ba2']}
+              style={styles.modalHeader}
+            >
+              <Text style={styles.modalTitle}>🛒 Nouvelle Vente</Text>
               <TouchableOpacity 
                 style={styles.closeButton}
                 onPress={() => setSaleModalVisible(false)}
               >
-                <Ionicons name="close" size={24} color={COLORS.text} />
+                <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
-            </View>
+            </LinearGradient>
             
-            <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {/* Produit sélectionné */}
               <View style={styles.productSummary}>
                 <View style={styles.productImageModal}>
                   {selectedProduct?.product_variant?.image ? (
                     <Image 
                       source={{ uri: selectedProduct.product_variant.image }} 
                       style={styles.modalProductImage}
-                      resizeMode="cover"
                     />
                   ) : (
                     <View style={styles.modalProductImagePlaceholder}>
@@ -737,80 +805,88 @@ export default function ProductsScreen() {
                 </View>
                 <View style={styles.productInfoModal}>
                   <Text style={styles.productSummaryTitle}>{selectedProduct?.product_name}</Text>
-                  <Text style={styles.productSummaryDetail}>{selectedProduct?.product_variant?.format?.name}</Text>
+                  <Text style={styles.productSummaryDetail}>
+                    {selectedProduct?.product_variant?.format?.name}
+                  </Text>
                   <Text style={styles.productSummaryPrice}>
                     {formatPrice(selectedProduct?.product_variant?.price || 0)}/unité
                   </Text>
                   <Text style={styles.productSummaryStock}>
-                    Stock: <Text style={{ fontWeight: 'bold', color: selectedProduct ? getStockStatus(selectedProduct)?.color : '#000' }}>
-                      {selectedProduct ? getAvailableStock(selectedProduct) : 0}
+                    Stock disponible: <Text style={{ fontWeight: 'bold', color: getStockStatus(selectedProduct)?.color }}>
+                      {getAvailableStock(selectedProduct)} unités
                     </Text>
                   </Text>
                 </View>
               </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Quantité à vendre</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={saleQuantity}
-                  onChangeText={setSaleQuantity}
-                  placeholder="0"
-                  placeholderTextColor="#ccc"
-                />
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Client</Text>
-                <TouchableOpacity 
-                  style={styles.customerSelector}
-                  onPress={() => setCustomerModalVisible(true)}
-                >
-                  {selectedCustomer ? (
-                    <View style={styles.selectedCustomer}>
-                      <View style={styles.customerAvatarSmall}>
-                        <Ionicons name="person" size={16} color={COLORS.primary} />
-                      </View>
-                      <Text style={styles.customerSelected}>{selectedCustomer.full_name}</Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.customerPlaceholder}>Sélectionner un client</Text>
-                  )}
-                  <Ionicons name="chevron-down" size={20} color={COLORS.textLight} />
-                </TouchableOpacity>
-              </View>
-              
-              {selectedCustomer && (
-                <View style={styles.customerInfo}>
-                  <View style={styles.customerDetailRow}>
-                    <Ionicons name="location" size={16} color={COLORS.textLight} />
-                    <Text style={styles.customerDetail}>{selectedCustomer.zone}</Text>
-                  </View>
-                  <View style={styles.customerDetailRow}>
-                    <Ionicons name="call" size={16} color={COLORS.textLight} />
-                    <Text style={styles.customerDetail}>{selectedCustomer.phone}</Text>
-                  </View>
-                </View>
-              )}
-              
-              {saleQuantity && !isNaN(parseInt(saleQuantity)) && parseInt(saleQuantity) > 0 && (
-                <View style={styles.totalAmountContainer}>
-                  <Text style={styles.totalAmountLabel}>Montant total</Text>
-                  <Text style={styles.totalAmountText}>{formatPrice(totalAmount)}</Text>
-                </View>
-              )}
 
-              {/* Indicateur de géolocalisation */}
-              <View style={styles.locationInfo}>
-                <Ionicons 
-                  name={location ? "location" : "location-outline"} 
-                  size={16} 
-                  color={location ? "#10ac84" : "#ff9f43"} 
-                />
-                <Text style={[styles.locationText, { color: location ? "#10ac84" : "#ff9f43" }]}>
-                  {location ? "Position GPS capturée" : "Position GPS en attente"}
-                </Text>
+              {/* Formulaire de vente */}
+              <View style={styles.formContainer}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Quantité à vendre</Text>
+                  <TextInput
+                    style={styles.input}
+                    keyboardType="numeric"
+                    value={saleQuantity}
+                    onChangeText={setSaleQuantity}
+                    placeholder="0"
+                    placeholderTextColor="#ccc"
+                  />
+                </View>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Sélectionner un client</Text>
+                  <TouchableOpacity 
+                    style={styles.customerSelector}
+                    onPress={() => setCustomerModalVisible(true)}
+                  >
+                    {selectedCustomer ? (
+                      <View style={styles.selectedCustomer}>
+                        <View style={styles.customerAvatarSmall}>
+                          <Text style={styles.customerInitials}>
+                            {selectedCustomer.name?.split(' ').map(n => n[0]).join('')}
+                          </Text>
+                        </View>
+                        <Text style={styles.customerSelected}>{selectedCustomer.name}</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.customerPlaceholder}>👤 Choisir un client</Text>
+                    )}
+                    <Ionicons name="chevron-down" size={20} color={COLORS.textLight} />
+                  </TouchableOpacity>
+                </View>
+
+                {selectedCustomer && (
+                  <View style={styles.customerInfo}>
+                    <View style={styles.customerDetailRow}>
+                      <Ionicons name="location" size={16} color={COLORS.textLight} />
+                      <Text style={styles.customerDetail}>{selectedCustomer.address}</Text>
+                    </View>
+                    <View style={styles.customerDetailRow}>
+                      <Ionicons name="call" size={16} color={COLORS.textLight} />
+                      <Text style={styles.customerDetail}>{selectedCustomer.phone}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Montant total */}
+                {saleQuantity && !isNaN(parseInt(saleQuantity)) && parseInt(saleQuantity) > 0 && (
+                  <View style={styles.totalAmountContainer}>
+                    <Text style={styles.totalAmountLabel}>Montant total</Text>
+                    <Text style={styles.totalAmountText}>{formatPrice(totalAmount)}</Text>
+                  </View>
+                )}
+
+                {/* Indicateur de géolocalisation */}
+                <View style={styles.locationInfo}>
+                  <Ionicons 
+                    name={location ? "location" : "location-outline"} 
+                    size={20} 
+                    color={location ? "#10ac84" : "#ff9f43"} 
+                  />
+                  <Text style={[styles.locationText, { color: location ? "#10ac84" : "#ff9f43" }]}>
+                    {location ? "📍 Position GPS capturée" : "🌍 En attente de géolocalisation"}
+                  </Text>
+                </View>
               </View>
             </ScrollView>
             
@@ -831,7 +907,7 @@ export default function ProductsScreen() {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <>
-                    <Ionicons name="checkmark" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Ionicons name="checkmark" size={20} color="#fff" />
                     <Text style={styles.confirmButtonText}>Confirmer</Text>
                   </>
                 )}
@@ -850,17 +926,20 @@ export default function ProductsScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, styles.customerModal]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Sélectionner un client</Text>
+            <LinearGradient
+              colors={['#667eea', '#764ba2']}
+              style={styles.modalHeader}
+            >
+              <Text style={styles.modalTitle}>👥 Sélectionner un client</Text>
               <TouchableOpacity 
                 style={styles.closeButton}
                 onPress={() => setCustomerModalVisible(false)}
               >
-                <Ionicons name="close" size={24} color={COLORS.text} />
+                <Ionicons name="close" size={24} color="#FFF" />
               </TouchableOpacity>
-            </View>
+            </LinearGradient>
             
-            <View style={styles.searchContainer}>
+            <View style={styles.searchContainerModal}>
               <Ionicons name="search" size={20} color={COLORS.textLight} style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
@@ -869,11 +948,6 @@ export default function ProductsScreen() {
                 onChangeText={setSearchQuery}
                 placeholderTextColor={COLORS.textLight}
               />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchButton}>
-                  <Ionicons name="close-circle" size={20} color={COLORS.textLight} />
-                </TouchableOpacity>
-              )}
             </View>
             
             <FlatList
@@ -888,17 +962,19 @@ export default function ProductsScreen() {
                   }}
                 >
                   <View style={styles.customerAvatar}>
-                    <Ionicons name="person" size={24} color={COLORS.primary} />
+                    <Text style={styles.customerInitials}>
+                      {item.name?.split(' ').map(n => n[0]).join('')}
+                    </Text>
                   </View>
                   <View style={styles.customerDetails}>
-                    <Text style={styles.customerName}>{item.full_name}</Text>
+                    <Text style={styles.customerName}>{item.name}</Text>
                     <View style={styles.customerMeta}>
                       <View style={styles.customerMetaItem}>
-                        <Ionicons name="location" size={12} color={COLORS.textLight} />
-                        <Text style={styles.customerZone}>{item.zone}</Text>
+                        <Ionicons name="location" size={14} color={COLORS.textLight} />
+                        <Text style={styles.customerZone}>{item.address}</Text>
                       </View>
                       <View style={styles.customerMetaItem}>
-                        <Ionicons name="call" size={12} color={COLORS.textLight} />
+                        <Ionicons name="call" size={14} color={COLORS.textLight} />
                         <Text style={styles.customerPhone}>{item.phone}</Text>
                       </View>
                     </View>
@@ -918,7 +994,7 @@ export default function ProductsScreen() {
           </View>
         </View>
       </Modal>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -931,7 +1007,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: COLORS.background,
+    backgroundColor: '#f8f9fa',
   },
   loadingText: {
     marginTop: 16,
@@ -939,40 +1015,43 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   header: {
-    backgroundColor: '#fff',
-    padding: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  headerTop: {
+  headerGradient: {
+    paddingTop: 60,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+  },
+  headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: COLORS.text,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: COLORS.textLight,
     marginBottom: 16,
   },
+  headerTextContainer: {
+    flex: 1,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
   refreshButton: {
-    padding: 4,
+    padding: 8,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 12,
     paddingHorizontal: 12,
     height: 44,
@@ -983,84 +1062,93 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: COLORS.text,
-  },
-  clearSearchButton: {
-    padding: 4,
+    color: '#FFF',
   },
   scrollView: {
     flex: 1,
   },
   statsContainer: {
     padding: 16,
-    paddingTop: 0,
-  },
-  statsCard: {
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  statsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  statsTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-    marginLeft: 10,
   },
   statsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 16,
   },
-  statCircle: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  statCircleNumber: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#fff',
-  },
-  statCircleLabel: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 4,
-  },
-  amountSummary: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 12,
+  statCard: {
+    flex: 1,
+    backgroundColor: '#FFF',
+    borderRadius: 16,
     padding: 16,
+    marginHorizontal: 4,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  amountRow: {
+  totalCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#667eea',
+  },
+  soldCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#10ac84',
+  },
+  remainingCard: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#ff9f43',
+  },
+  statIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    textAlign: 'center',
+  },
+  performanceCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  performanceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  amountLabel: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  amountValue: {
+  performanceTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  performanceValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.primary,
   },
   progressBar: {
     height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: '#f0f0f0',
     borderRadius: 3,
     overflow: 'hidden',
     marginBottom: 8,
@@ -1068,18 +1156,31 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     borderRadius: 3,
+    backgroundColor: COLORS.primary,
   },
-  progressLabels: {
+  performanceFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  progressText: {
+  performanceAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  performanceLabel: {
     fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: COLORS.textLight,
   },
-  filterContainer: {
+  filterSection: {
     paddingHorizontal: 16,
     marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginBottom: 12,
   },
   filterScroll: {
     flexGrow: 0,
@@ -1088,68 +1189,88 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 20,
-    backgroundColor: '#fff',
+    backgroundColor: '#FFF',
     borderWidth: 1,
     borderColor: '#e0e0e0',
     marginRight: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   filterButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    borderColor: 'transparent',
   },
   filterText: {
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.text,
-    marginLeft: 4,
+    marginLeft: 6,
   },
   filterTextActive: {
-    color: '#fff',
+    color: '#FFF',
   },
   productsSection: {
     paddingHorizontal: 16,
     paddingBottom: 20,
   },
   sectionHeader: {
+    marginBottom: 16,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    marginTop: 4,
+  },
+  sectionHeaderCard: {
+    backgroundColor: '#FFF',
+    borderLeftWidth: 4,
+    marginBottom: 8,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sectionHeaderContent: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  sectionIndicator: {
-    width: 4,
-    height: 20,
-    borderRadius: 2,
-    marginRight: 8,
   },
   sectionHeaderText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: 'bold',
+    marginLeft: 8,
     flex: 1,
   },
-  sectionCount: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textLight,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+  sectionCountBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  productItem: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
+  sectionCountText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  productCard: {
+    backgroundColor: '#FFF',
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  productHeader: {
+    flexDirection: 'row',
+    marginBottom: 12,
   },
   productImageContainer: {
     marginRight: 12,
@@ -1167,59 +1288,74 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  productContent: {
+  productInfo: {
     flex: 1,
-  },
-  productHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
+    marginRight: 12,
   },
   productName: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: 'bold',
     color: COLORS.text,
-    flex: 1,
-    marginRight: 8,
-  },
-  productPrice: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.accent,
-  },
-  productFormat: {
-    fontSize: 14,
-    color: COLORS.primary,
-    marginBottom: 2,
-    fontWeight: '500',
+    marginBottom: 4,
   },
   productSku: {
     fontSize: 12,
     color: COLORS.textLight,
+    marginBottom: 2,
+  },
+  productFormat: {
+    fontSize: 14,
+    color: COLORS.primary,
+    fontWeight: '500',
+  },
+  productPriceContainer: {
+    alignItems: 'flex-end',
+  },
+  productPrice: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.accent,
     marginBottom: 8,
   },
-  stockInfoRow: {
+  saleButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  saleButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  productFooter: {
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    paddingTop: 12,
+  },
+  stockInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
-  stockStats: {
-    flexDirection: 'row',
-  },
   stockStat: {
-    marginRight: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   stockLabel: {
-    fontSize: 12,
+    fontSize: 14,
     color: COLORS.textLight,
+    marginRight: 4,
   },
   stockValue: {
     fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginTop: 2,
+    fontWeight: 'bold',
   },
   statusBadge: {
     flexDirection: 'row',
@@ -1230,7 +1366,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: 'bold',
     marginLeft: 4,
   },
   progressContainer: {
@@ -1254,46 +1390,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textLight,
     minWidth: 30,
-    textAlign: 'right',
-  },
-  productAction: {
-    justifyContent: 'center',
-    marginLeft: 12,
-  },
-  saleButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  saleButtonDisabled: {
-    backgroundColor: '#ccc',
-    opacity: 0.5,
   },
   emptyState: {
     alignItems: 'center',
     paddingVertical: 40,
-    backgroundColor: '#fff',
+    backgroundColor: '#FFF',
     borderRadius: 16,
-    marginTop: 20,
   },
-  emptyStateText: {
-    color: COLORS.textLight,
-    fontSize: 16,
-    marginTop: 12,
+  emptyStateTitle: {
+    fontSize: 18,
     fontWeight: '600',
+    color: COLORS.textLight,
+    marginTop: 16,
   },
   emptyStateSubtext: {
-    color: '#ccc',
     fontSize: 14,
-    marginTop: 4,
+    color: '#ccc',
+    marginTop: 8,
     textAlign: 'center',
   },
   modalOverlay: {
@@ -1306,13 +1419,14 @@ const styles = StyleSheet.create({
   modalContainer: {
     backgroundColor: COLORS.surface,
     borderRadius: 20,
-    padding: 0,
     width: '100%',
     maxHeight: '85%',
     overflow: 'hidden',
-  },
-  modalScrollView: {
-    maxHeight: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
   },
   customerModal: {
     maxHeight: '90%',
@@ -1322,16 +1436,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontWeight: 'bold',
+    color: '#FFF',
   },
   closeButton: {
     padding: 4,
+  },
+  modalContent: {
+    maxHeight: 400,
   },
   productSummary: {
     flexDirection: 'row',
@@ -1343,13 +1458,13 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   modalProductImage: {
-    width: 60,
-    height: 60,
+    width: 80,
+    height: 80,
     borderRadius: 12,
   },
   modalProductImagePlaceholder: {
-    width: 60,
-    height: 60,
+    width: 80,
+    height: 80,
     borderRadius: 12,
     backgroundColor: '#f5f5f5',
     justifyContent: 'center',
@@ -1357,10 +1472,11 @@ const styles = StyleSheet.create({
   },
   productInfoModal: {
     flex: 1,
+    justifyContent: 'center',
   },
   productSummaryTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: 'bold',
     color: COLORS.text,
     marginBottom: 4,
   },
@@ -1373,22 +1489,24 @@ const styles = StyleSheet.create({
   productSummaryPrice: {
     fontSize: 16,
     color: COLORS.accent,
-    fontWeight: '700',
+    fontWeight: 'bold',
     marginBottom: 4,
   },
   productSummaryStock: {
     fontSize: 14,
     color: COLORS.textLight,
   },
-  inputGroup: {
+  formContainer: {
     padding: 20,
-    paddingBottom: 0,
+  },
+  inputGroup: {
+    marginBottom: 16,
   },
   inputLabel: {
     fontSize: 16,
+    fontWeight: '600',
     color: COLORS.text,
     marginBottom: 8,
-    fontWeight: '600',
   },
   input: {
     borderWidth: 1,
@@ -1413,13 +1531,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   customerAvatarSmall: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#e8f4fd',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
+  },
+  customerInitials: {
+    color: COLORS.primary,
+    fontWeight: 'bold',
+    fontSize: 12,
   },
   customerSelected: {
     color: COLORS.text,
@@ -1429,13 +1552,15 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
   },
   customerInfo: {
-    padding: 20,
-    paddingTop: 12,
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    marginBottom: 16,
   },
   customerDetailRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   customerDetail: {
     fontSize: 14,
@@ -1443,14 +1568,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   totalAmountContainer: {
-    margin: 20,
-    marginTop: 0,
     padding: 16,
     backgroundColor: '#e8f4fd',
     borderRadius: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 16,
   },
   totalAmountLabel: {
     fontSize: 16,
@@ -1458,28 +1582,25 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   totalAmountText: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: 'bold',
     color: COLORS.primary,
   },
   locationInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    marginHorizontal: 20,
+    padding: 12,
     backgroundColor: '#f8f9fa',
     borderRadius: 8,
-    marginBottom: 10,
   },
   locationText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
     marginLeft: 8,
   },
   modalActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     padding: 20,
     paddingTop: 0,
   },
@@ -1502,19 +1623,28 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     backgroundColor: '#ccc',
-    opacity: 0.7,
   },
   cancelButtonText: {
     color: COLORS.text,
-    fontWeight: '700',
+    fontWeight: 'bold',
   },
   confirmButtonText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: '#FFF',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  searchContainerModal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    margin: 16,
+    marginBottom: 0,
   },
   customerItem: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,

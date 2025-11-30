@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   StyleSheet, 
   Platform,
   KeyboardAvoidingView,
-  SafeAreaView 
+  SafeAreaView,
+  ActivityIndicator
 } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -13,106 +14,185 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Import des écrans
+// Screens
 import LoginScreen from './src/screens/LoginScreen';
 import CollectionScreen from './src/screens/CollectionScreen';
 import ProductsScreen from './src/screens/ProductsScreen';
 import SalesReportScreen from './src/screens/SalesReportScreen';
 import PointOfSaleScreen from './src/screens/PointOfSaleScreen';
-// Couleurs
+import ProductsScreenPOS from './src/screens/ProductsScreenPOS';
+
+// Design System
 import { COLORS } from './src/styles/colors';
 
-// Composant HeaderMenu
+// Components
 import HeaderMenu from './src/screens/HeaderMenu';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-// Navigation des onglets principaux
-function MainTabNavigator({ onLogout }) {
+// Constants
+const TAB_BAR_CONFIG = {
+  ios: {
+    height: 85,
+    paddingBottom: 25,
+    paddingTop: 8,
+  },
+  android: {
+    height: 65,
+    paddingBottom: 8,
+    paddingTop: 8,
+  },
+};
+
+const SCREENS_CONFIG = {
+  Collection: {
+    title: 'Collecte Clients',
+    icon: {
+      focused: 'people',
+      outline: 'people-outline',
+    },
+    component: CollectionScreen,
+  },
+  // PointsDeVente: {
+  //   title: 'Points de Vente',
+  //   icon: {
+  //     focused: 'business',
+  //     outline: 'business-outline',
+  //   },
+  //   component: PointOfSaleScreen,
+  // },
+  Produits: {
+    title: 'Vente Pushcart',
+    icon: {
+      focused: 'cube',
+      outline: 'cube-outline',
+    },
+    component: ProductsScreen,
+  },
+  // ProduitsPOS: {
+  //   title: 'Vente POS',
+  //   icon: {
+  //     focused: 'cart',
+  //     outline: 'cart-outline',
+  //   },
+  //   component: ProductsScreenPOS,
+  // },
+  Rapport: {
+    title: 'Rapport Ventes',
+    icon: {
+      focused: 'stats-chart',
+      outline: 'stats-chart-outline',
+    },
+    component: SalesReportScreen,
+  },
+};
+
+// Navigation Components
+const MainTabNavigator = ({ onLogout }) => {
+  const renderTabBarIcon = useCallback((route, focused, color, size) => {
+    const screenConfig = SCREENS_CONFIG[route.name];
+    if (!screenConfig) return null;
+    
+    const iconName = focused ? screenConfig.icon.focused : screenConfig.icon.outline;
+    
+    return <Ionicons name={iconName} size={size} color={color} />;
+  }, []);
+
+  const getTabBarStyle = useCallback(() => ({
+    backgroundColor: COLORS.surface,
+    borderTopColor: COLORS.border,
+    height: TAB_BAR_CONFIG[Platform.OS].height,
+    paddingBottom: TAB_BAR_CONFIG[Platform.OS].paddingBottom,
+    paddingTop: TAB_BAR_CONFIG[Platform.OS].paddingTop,
+    // Supprimer position: 'absolute' pour permettre le scroll
+    elevation: 8,
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: -2 },
+    shadowRadius: 4,
+    borderTopWidth: 1,
+  }), []);
+
+  const getTabBarLabelStyle = useCallback(() => ({
+    fontSize: 11,
+    marginBottom: Platform.OS === 'ios' ? 4 : 2,
+    fontWeight: '500',
+  }), []);
+
+  const getScreenOptions = useCallback(({ route }) => ({
+    tabBarIcon: ({ focused, color, size }) => 
+      renderTabBarIcon(route, focused, color, size),
+    tabBarActiveTintColor: COLORS.primary,
+    tabBarInactiveTintColor: COLORS.textLight,
+    tabBarStyle: getTabBarStyle(),
+    tabBarLabelStyle: getTabBarLabelStyle(),
+    headerStyle: {
+      backgroundColor: COLORS.primary,
+      elevation: 4,
+      shadowOpacity: 0.1,
+      shadowOffset: { width: 0, height: 2},
+      shadowRadius: 4,
+    },
+    headerTintColor: COLORS.surface,
+    headerTitleStyle: {
+      fontWeight: 'bold',
+      fontSize: 18,
+    },
+    headerRight: () => <HeaderMenu onLogout={onLogout} />,
+    headerShown: true,
+    // Ajouter un padding safe area pour le contenu
+    contentStyle: {
+      backgroundColor: COLORS.background,
+      paddingBottom: TAB_BAR_CONFIG[Platform.OS].height + 10, // Espace pour le tab bar
+    },
+  }), [onLogout, renderTabBarIcon, getTabBarStyle, getTabBarLabelStyle]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarIcon: ({ focused, color, size }) => {
-            let iconName;
-
-            if (route.name === 'Collection') {
-              iconName = focused ? 'people' : 'people-outline';
-            } else if (route.name === 'Produits') {
-              iconName = focused ? 'cube' : 'cube-outline';
-            } else if (route.name === 'Rapport') {
-              iconName = focused ? 'stats-chart' : 'stats-chart-outline';
-            } else if (route.name === 'PointsDeVente') {
-              iconName = focused ? 'business' : 'business-outline';
-            }
-
-            return <Ionicons name={iconName} size={size} color={color} />;
-          },
-          tabBarActiveTintColor: COLORS.primary,
-          tabBarInactiveTintColor: COLORS.textLight,
-          tabBarStyle: {
-            backgroundColor: COLORS.surface,
-            borderTopColor: COLORS.border,
-            height: Platform.OS === 'ios' ? 85 : 55,
-            paddingBottom: Platform.OS === 'ios' ? 25 : 8,
-            paddingTop: 8,
-            position: 'absolute',
-            elevation: 0,
-            shadowOpacity: 0,
-            borderTopWidth: 0,
-          },
-          tabBarLabelStyle: {
-            fontSize: 12,
-            marginBottom: Platform.OS === 'ios' ? 0 : 4,
-          },
-          headerStyle: {
-            backgroundColor: COLORS.primary,
-            elevation: 0,
-            shadowOpacity: 0,
-          },
-          headerTintColor: COLORS.surface,
-          headerTitleStyle: {
-            fontWeight: 'bold',
-          },
-          headerRight: () => <HeaderMenu onLogout={onLogout} />,
-          headerShown: true,
-        })}
+      <Tab.Navigator 
+        screenOptions={getScreenOptions}
+        sceneContainerStyle={styles.sceneContainer}
       >
-        <Tab.Screen 
-          name="Collection" 
-          component={CollectionScreen}
-          options={{ 
-            title: 'Collecte Clients',
-          }}
-        />
-        <Tab.Screen 
-          name="PointsDeVente" 
-          component={PointOfSaleScreen}
-          options={{ 
-            title: 'Points de Vente',
-          }}
-        />
-        <Tab.Screen 
-          name="Produits" 
-          component={ProductsScreen}
-          options={{ 
-            title: 'Mes Produits',
-          }}
-        />
-        <Tab.Screen 
-          name="Rapport" 
-          component={SalesReportScreen}
-          options={{ 
-            title: 'Rapport Ventes',
-          }}
-        />
+        {Object.entries(SCREENS_CONFIG).map(([name, config]) => (
+          <Tab.Screen 
+            key={name}
+            name={name} 
+            component={config.component}
+            options={{ 
+              title: config.title,
+              // Options spécifiques pour chaque écran
+              ...getScreenSpecificOptions(name),
+            }}
+          />
+        ))}
       </Tab.Navigator>
     </SafeAreaView>
   );
-}
+};
 
-export default function App() {
+// Fonction pour les options spécifiques à chaque écran
+const getScreenSpecificOptions = (screenName) => {
+  const specificOptions = {
+    Produits: {
+      headerShown: true,
+    },
+    ProduitsPOS: {
+      headerShown: true,
+    },
+    Rapport: {
+      headerShown: true,
+    },
+    // Options par défaut
+    default: {
+      headerShown: true,
+    }
+  };
+
+  return specificOptions[screenName] || specificOptions.default;
+};
+
+// Main App Component
+const App = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -125,7 +205,7 @@ export default function App() {
       const userToken = await AsyncStorage.getItem('userToken');
       setIsLoggedIn(!!userToken);
     } catch (error) {
-      console.log('Erreur lors de la vérification du token:', error);
+      console.error('Erreur lors de la vérification du token:', error);
     } finally {
       setIsLoading(false);
     }
@@ -134,48 +214,69 @@ export default function App() {
   const handleLogout = async () => {
     try {
       await AsyncStorage.removeItem('userToken');
+      await AsyncStorage.removeItem('userData');
       setIsLoggedIn(false);
     } catch (error) {
-      console.log('Erreur lors de la déconnexion:', error);
+      console.error('Erreur lors de la déconnexion:', error);
     }
   };
 
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        {/* Ajouter un indicateur de chargement ici si nécessaire */}
-      </View>
-    );
-  }
+  const handleLogin = useCallback(() => {
+    setIsLoggedIn(true);
+  }, []);
 
-  return (
+  const renderLoading = () => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color={COLORS.primary} />
+    </View>
+  );
+
+  const renderNavigation = () => (
     <KeyboardAvoidingView 
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <StatusBar style="light" backgroundColor={COLORS.primary} />
       <NavigationContainer>
         <Stack.Navigator 
           screenOptions={{ 
             headerShown: false,
-            cardStyle: { backgroundColor: COLORS.background }
+            cardStyle: { backgroundColor: COLORS.background },
+            presentation: 'card',
           }}
         >
           {isLoggedIn ? (
-            <Stack.Screen name="Main">
-              {props => <MainTabNavigator {...props} onLogout={handleLogout} />}
+            <Stack.Screen 
+              name="Main" 
+              options={{ headerShown: false }}
+            >
+              {(props) => <MainTabNavigator {...props} onLogout={handleLogout} />}
             </Stack.Screen>
           ) : (
-            <Stack.Screen name="Login">
-              {props => <LoginScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
+            <Stack.Screen 
+              name="Login" 
+              options={{ 
+                headerShown: false,
+                animationTypeForReplace: 'pop',
+              }}
+            >
+              {(props) => <LoginScreen {...props} onLogin={handleLogin} />}
             </Stack.Screen>
           )}
         </Stack.Navigator>
       </NavigationContainer>
     </KeyboardAvoidingView>
   );
-}
 
+  if (isLoading) {
+    return renderLoading();
+  }
+
+  return renderNavigation();
+};
+
+// Styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -185,6 +286,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.primary,
   },
+  sceneContainer: {
+    backgroundColor: COLORS.background,
+    // Ajouter un padding pour éviter que le contenu soit caché derrière le tab bar
+    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -192,3 +298,5 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
 });
+
+export default App;

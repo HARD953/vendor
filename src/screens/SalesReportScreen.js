@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,17 +10,34 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Dimensions
+  Dimensions,
+  SafeAreaView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COLORS } from '../styles/colors';
-import { LineChart, BarChart, PieChart } from 'react-native-gifted-charts';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BarChart, LineChart, PieChart } from 'react-native-gifted-charts';
 
-const API_BASE_URL = "https://backendsupply.onrender.com/api";
-const { width } = Dimensions.get('window');
+// Couleurs
+const COLORS = {
+  primary: '#667eea',
+  secondary: '#764ba2',
+  accent: '#f093fb',
+  success: '#4CAF50',
+  warning: '#FF9800',
+  error: '#F44336',
+  background: '#f8f9fa',
+  surface: '#FFFFFF',
+  text: '#2D3748',
+  textLight: '#718096',
+  border: '#E2E8F0'
+};
+
+const { width, height } = Dimensions.get('window');
+const API_BASE_URL = "https://api.pushtrack360.com/api";
 
 export default function SalesReportScreen() {
+  const [salesData, setSalesData] = useState([]);
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -32,20 +49,40 @@ export default function SalesReportScreen() {
     total_quantitys: 0
   });
   const [activeTab, setActiveTab] = useState('overview');
-  const fadeAnim = useState(new Animated.Value(0))[0];
+  const [timeRange, setTimeRange] = useState('today');
+  
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
 
   useEffect(() => {
     loadAllData();
+    animateEntrance();
   }, []);
 
-  useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 500,
-      easing: Easing.ease,
-      useNativeDriver: true,
-    }).start();
-  }, [fadeAnim]);
+  const animateEntrance = () => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 20,
+        friction: 7,
+        useNativeDriver: true,
+      })
+    ]).start();
+  };
 
   const getAuthHeader = async () => {
     const token = await AsyncStorage.getItem('accessToken');
@@ -53,6 +90,22 @@ export default function SalesReportScreen() {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/json',
     };
+  };
+
+  const loadSalesData = async () => {
+    try {
+      const headers = await getAuthHeader();
+      const response = await fetch(`${API_BASE_URL}/sales/`, {
+        headers
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setSalesData(data);
+      }
+    } catch (error) {
+      console.log('Erreur lors du chargement des ventes:', error);
+    }
   };
 
   const loadSalesSummary = async () => {
@@ -80,24 +133,47 @@ export default function SalesReportScreen() {
     }
   };
 
-  const loadData = async () => {
+  const loadClientsData = async () => {
     try {
-      const [clientsData, productsData] = await Promise.all([
-        AsyncStorage.getItem('clients'),
-        AsyncStorage.getItem('products'),
-      ]);
-
-      setClients(clientsData ? JSON.parse(clientsData) : []);
-      setProducts(productsData ? JSON.parse(productsData) : []);
+      const headers = await getAuthHeader();
+      const response = await fetch(`${API_BASE_URL}/purchases/`, {
+        headers
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setClients(data);
+      }
     } catch (error) {
-      console.log('Erreur lors du chargement des données:', error);
+      console.log('Erreur lors du chargement des clients:', error);
+    }
+  };
+
+  const loadProductsData = async () => {
+    try {
+      const headers = await getAuthHeader();
+      const response = await fetch(`${API_BASE_URL}/vendor-activities/`, {
+        headers
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setProducts(data);
+      }
+    } catch (error) {
+      console.log('Erreur lors du chargement des produits:', error);
     }
   };
 
   const loadAllData = async () => {
     setIsLoading(true);
     try {
-      await Promise.all([loadData(), loadSalesSummary()]);
+      await Promise.all([
+        loadSalesData(),
+        loadSalesSummary(),
+        loadClientsData(),
+        loadProductsData()
+      ]);
     } catch (error) {
       Alert.alert('Erreur', 'Impossible de charger les données');
     } finally {
@@ -107,32 +183,8 @@ export default function SalesReportScreen() {
 
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([loadData(), loadSalesSummary()]);
+    await loadAllData();
     setIsRefreshing(false);
-  };
-
-  const resetData = () => {
-    Alert.alert(
-      'Réinitialiser les données',
-      'Êtes-vous sûr de vouloir supprimer toutes les données du jour? Cette action est irréversible.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Confirmer',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await AsyncStorage.multiRemove(['clients', 'products']);
-              setClients([]);
-              setProducts([]);
-              Alert.alert('Succès', 'Données réinitialisées');
-            } catch (error) {
-              Alert.alert('Erreur', 'Erreur lors de la réinitialisation');
-            }
-          }
-        }
-      ]
-    );
   };
 
   const formatPrice = (price) => {
@@ -152,21 +204,54 @@ export default function SalesReportScreen() {
     });
   };
 
-  // Calculs des statistiques
+  // Calculs des statistiques avancées
+  const getSalesStats = () => {
+    const totalRevenue = salesData.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
+    const totalQuantity = salesData.reduce((sum, sale) => sum + (sale.quantity || 0), 0);
+    const averageSaleValue = salesData.length > 0 ? totalRevenue / salesData.length : 0;
+    
+    // Ventes par heure
+    const hourlySales = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      sales: 0,
+      revenue: 0
+    }));
+    
+    salesData.forEach(sale => {
+      const hour = new Date(sale.created_at).getHours();
+      hourlySales[hour].sales += 1;
+      hourlySales[hour].revenue += parseFloat(sale.total_amount || 0);
+    });
+
+    return {
+      totalRevenue,
+      totalQuantity,
+      averageSaleValue,
+      totalSales: salesData.length,
+      hourlySales
+    };
+  };
+
   const getClientStats = () => {
     const totalClients = clients.length;
-    const totalClientRevenue = clients.reduce((sum, client) => sum + client.amount, 0);
+    const totalClientRevenue = clients.reduce((sum, client) => sum + parseFloat(client.amount || 0), 0);
     const averageClientValue = totalClients > 0 ? totalClientRevenue / totalClients : 0;
     
     // Grouper par zone
     const zoneStats = clients.reduce((acc, client) => {
-      if (!acc[client.zone]) {
-        acc[client.zone] = { count: 0, revenue: 0 };
+      const zone = client.zone || 'Non spécifié';
+      if (!acc[zone]) {
+        acc[zone] = { count: 0, revenue: 0 };
       }
-      acc[client.zone].count += 1;
-      acc[client.zone].revenue += client.amount;
+      acc[zone].count += 1;
+      acc[zone].revenue += parseFloat(client.amount || 0);
       return acc;
     }, {});
+
+    // Top clients
+    const topClients = [...clients]
+      .sort((a, b) => parseFloat(b.amount || 0) - parseFloat(a.amount || 0))
+      .slice(0, 5);
 
     return {
       totalClients,
@@ -175,19 +260,38 @@ export default function SalesReportScreen() {
       zoneStats: Object.entries(zoneStats).map(([zone, data]) => ({
         zone,
         ...data
-      }))
+      })),
+      topClients
     };
   };
 
   const getProductStats = () => {
-    const totalAssigned = products.reduce((sum, product) => sum + product.quantity, 0);
-    const totalSold = products.reduce((sum, product) => sum + product.soldQuantity, 0);
-    const totalProductRevenue = products.reduce((sum, product) => sum + (product.soldQuantity * product.unitPrice), 0);
+    let allProducts = [];
+    
+    // Extraire tous les produits des activités
+    products.forEach(activity => {
+      if (activity.order_items) {
+        activity.order_items.forEach(item => {
+          if (item.product_variant) {
+            allProducts.push({
+              ...item,
+              soldQuantity: activity.quantity_sales || 0,
+              assignedQuantity: activity.quantity_assignes || 0
+            });
+          }
+        });
+      }
+    });
+
+    const totalAssigned = allProducts.reduce((sum, product) => sum + (product.assignedQuantity || 0), 0);
+    const totalSold = allProducts.reduce((sum, product) => sum + (product.soldQuantity || 0), 0);
+    const totalProductRevenue = salesData.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
     const remainingStock = totalAssigned - totalSold;
     const sellRate = totalAssigned > 0 ? (totalSold / totalAssigned) * 100 : 0;
 
     // Top produits vendus
-    const topProducts = [...products]
+    const topProducts = allProducts
+      .filter(product => product.soldQuantity > 0)
       .sort((a, b) => b.soldQuantity - a.soldQuantity)
       .slice(0, 5);
 
@@ -201,66 +305,378 @@ export default function SalesReportScreen() {
     };
   };
 
+  const salesStats = getSalesStats();
   const clientStats = getClientStats();
   const productStats = getProductStats();
-  const totalRevenue = clientStats.totalClientRevenue + productStats.totalProductRevenue;
 
   // Données pour les graphiques
-  const zoneChartData = clientStats.zoneStats.length > 0 ? {
-    labels: clientStats.zoneStats.map(zone => zone.zone.substring(0, 10)),
-    datasets: [{
-      data: clientStats.zoneStats.map(zone => zone.revenue)
-    }]
-  } : null;
+  const revenueChartData = salesStats.hourlySales.map((hour, index) => ({
+    value: hour.revenue,
+    label: `${hour.hour}h`,
+    frontColor: hour.revenue > 0 ? '#4CAF50' : '#e0e0e0',
+    gradientColor: hour.revenue > 0 ? '#81C784' : '#e0e0e0',
+  }));
 
-  const productChartData = productStats.topProducts.length > 0 ? {
-    labels: productStats.topProducts.map(p => p.name.substring(0, 10)),
-    datasets: [{
-      data: productStats.topProducts.map(p => p.soldQuantity)
-    }]
-  } : null;
+  const zoneChartData = clientStats.zoneStats.slice(0, 6).map((zone, index) => ({
+    value: zone.revenue,
+    label: zone.zone.substring(0, 8),
+    frontColor: ['#667eea', '#764ba2', '#f093fb', '#4CAF50', '#FF9800', '#F44336'][index],
+  }));
+
+  const productChartData = productStats.topProducts.map((product, index) => ({
+    value: product.soldQuantity,
+    label: product.product_name?.substring(0, 6) || 'Prod',
+    frontColor: ['#667eea', '#764ba2', '#f093fb', '#4CAF50', '#FF9800'][index],
+  }));
+
+  const renderOverviewTab = () => (
+    <Animated.View 
+      style={[
+        styles.tabContent,
+        { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
+      ]}
+    >
+      {/* Cartes de statistiques principales */}
+      <View style={styles.statsGrid}>
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          style={[styles.statCard, styles.mainStatCard]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={styles.statIconContainer}>
+            <Ionicons name="trending-up" size={32} color="#FFF" />
+          </View>
+          <Text style={styles.mainStatValue}>{formatPrice(salesStats.totalRevenue)}</Text>
+          <Text style={styles.mainStatLabel}>Chiffre d'affaires total</Text>
+          <Text style={styles.statSubtext}>{salesStats.totalSales} ventes</Text>
+        </LinearGradient>
+
+        <View style={styles.statsSubGrid}>
+          <View style={[styles.statCard, styles.subStatCard]}>
+            <Ionicons name="people" size={24} color="#667eea" />
+            <Text style={styles.subStatValue}>{clientStats.totalClients}</Text>
+            <Text style={styles.subStatLabel}>Clients</Text>
+          </View>
+          
+          <View style={[styles.statCard, styles.subStatCard]}>
+            <Ionicons name="cart" size={24} color="#4CAF50" />
+            <Text style={styles.subStatValue}>{productStats.totalSold}</Text>
+            <Text style={styles.subStatLabel}>Produits vendus</Text>
+          </View>
+          
+          <View style={[styles.statCard, styles.subStatCard]}>
+            <Ionicons name="cash" size={24} color="#FF9800" />
+            <Text style={styles.subStatValue}>{formatPrice(salesStats.averageSaleValue)}</Text>
+            <Text style={styles.subStatLabel}>Panier moyen</Text>
+          </View>
+          
+          <View style={[styles.statCard, styles.subStatCard]}>
+            <Ionicons name="speedometer" size={24} color="#F44336" />
+            <Text style={styles.subStatValue}>{Math.round(productStats.sellRate)}%</Text>
+            <Text style={styles.subStatLabel}>Taux de vente</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Graphiques principaux */}
+      <View style={styles.chartsContainer}>
+        <View style={styles.chartCard}>
+          <View style={styles.chartHeader}>
+            <Ionicons name="bar-chart" size={24} color="#667eea" />
+            <Text style={styles.chartTitle}>Revenus par heure</Text>
+          </View>
+          <BarChart
+            data={revenueChartData}
+            barWidth={22}
+            spacing={24}
+            roundedTop
+            roundedBottom
+            hideRules
+            xAxisThickness={0}
+            yAxisThickness={0}
+            noOfSections={4}
+            maxValue={Math.max(...revenueChartData.map(d => d.value)) * 1.2}
+            height={160}
+            initialSpacing={10}
+            yAxisTextStyle={{ color: '#718096', fontSize: 12 }}
+            xAxisLabelTextStyle={{ color: '#718096', fontSize: 10 }}
+          />
+        </View>
+
+        <View style={styles.chartRow}>
+          <View style={[styles.chartCard, styles.halfChart]}>
+            <View style={styles.chartHeader}>
+              <Ionicons name="pie-chart" size={20} color="#764ba2" />
+              <Text style={styles.chartTitle}>Zones</Text>
+            </View>
+            <PieChart
+              data={zoneChartData}
+              donut
+              showGradient
+              sectionAutoFocus
+              radius={70}
+              innerRadius={50}
+              innerCircleColor={COLORS.background}
+              centerLabelComponent={() => (
+                <View style={styles.pieChartCenter}>
+                  <Text style={styles.pieChartCenterText}>
+                    {clientStats.zoneStats.length}
+                  </Text>
+                  <Text style={styles.pieChartCenterSubtext}>Zones</Text>
+                </View>
+              )}
+            />
+          </View>
+
+          <View style={[styles.chartCard, styles.halfChart]}>
+            <View style={styles.chartHeader}>
+              <Ionicons name="star" size={20} color="#f093fb" />
+              <Text style={styles.chartTitle}>Top Produits</Text>
+            </View>
+            <BarChart
+              data={productChartData}
+              barWidth={16}
+              spacing={20}
+              roundedTop
+              roundedBottom
+              hideRules
+              xAxisThickness={0}
+              yAxisThickness={0}
+              noOfSections={3}
+              height={140}
+              initialSpacing={10}
+              yAxisTextStyle={{ color: '#718096', fontSize: 10 }}
+            />
+          </View>
+        </View>
+      </View>
+    </Animated.View>
+  );
+
+  const renderClientsTab = () => (
+    <Animated.View 
+      style={[
+        styles.tabContent,
+        { opacity: fadeAnim }
+      ]}
+    >
+      <View style={styles.statsRow}>
+        <View style={[styles.statCard, styles.insightCard]}>
+          <Ionicons name="people" size={32} color="#667eea" />
+          <Text style={styles.insightValue}>{clientStats.totalClients}</Text>
+          <Text style={styles.insightLabel}>Clients total</Text>
+        </View>
+        
+        <View style={[styles.statCard, styles.insightCard]}>
+          <Ionicons name="trending-up" size={32} color="#4CAF50" />
+          <Text style={styles.insightValue}>{formatPrice(clientStats.totalClientRevenue)}</Text>
+          <Text style={styles.insightLabel}>Revenus clients</Text>
+        </View>
+        
+        <View style={[styles.statCard, styles.insightCard]}>
+          <Ionicons name="calculator" size={32} color="#FF9800" />
+          <Text style={styles.insightValue}>{formatPrice(clientStats.averageClientValue)}</Text>
+          <Text style={styles.insightLabel}>Panier moyen</Text>
+        </View>
+      </View>
+
+      {clientStats.zoneStats.length > 0 && (
+        <View style={styles.chartCard}>
+          <View style={styles.chartHeader}>
+            <Ionicons name="map" size={24} color="#667eea" />
+            <Text style={styles.chartTitle}>Performance par zone</Text>
+          </View>
+          <BarChart
+            data={zoneChartData}
+            barWidth={28}
+            spacing={20}
+            roundedTop
+            roundedBottom
+            showGradient
+            gradientColor="#667eea"
+            frontColor="#667eea"
+            height={200}
+            initialSpacing={10}
+            yAxisTextStyle={{ color: '#718096', fontSize: 12 }}
+            xAxisLabelTextStyle={{ color: '#718096', fontSize: 10 }}
+          />
+        </View>
+      )}
+
+      {clientStats.topClients.length > 0 && (
+        <View style={styles.listCard}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="trophy" size={24} color="#FFD700" />
+            <Text style={styles.cardTitle}>Top Clients</Text>
+          </View>
+          {clientStats.topClients.map((client, index) => (
+            <View key={client.id} style={styles.listItem}>
+              <View style={styles.rankContainer}>
+                <View style={[
+                  styles.rankBadge,
+                  index === 0 && styles.firstRank,
+                  index === 1 && styles.secondRank,
+                  index === 2 && styles.thirdRank
+                ]}>
+                  <Text style={styles.rankText}>#{index + 1}</Text>
+                </View>
+                <View style={styles.clientInfo}>
+                  <Text style={styles.clientName}>{client.full_name}</Text>
+                  <Text style={styles.clientZone}>{client.zone}</Text>
+                </View>
+              </View>
+              <View style={styles.clientStats}>
+                <Text style={styles.clientAmount}>{formatPrice(client.amount)}</Text>
+                <Text style={styles.clientPhone}>{client.phone}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+    </Animated.View>
+  );
+
+  const renderProductsTab = () => (
+    <Animated.View 
+      style={[
+        styles.tabContent,
+        { opacity: fadeAnim }
+      ]}
+    >
+      <View style={styles.statsRow}>
+        <View style={[styles.statCard, styles.insightCard]}>
+          <Ionicons name="cube" size={32} color="#667eea" />
+          <Text style={styles.insightValue}>{productStats.totalAssigned}</Text>
+          <Text style={styles.insightLabel}>Stock assigné</Text>
+        </View>
+        
+        <View style={[styles.statCard, styles.insightCard]}>
+          <Ionicons name="checkmark-circle" size={32} color="#4CAF50" />
+          <Text style={styles.insightValue}>{productStats.totalSold}</Text>
+          <Text style={styles.insightLabel}>Vendus</Text>
+        </View>
+        
+        <View style={[styles.statCard, styles.insightCard]}>
+          <Ionicons name="time" size={32} color="#FF9800" />
+          <Text style={styles.insightValue}>{productStats.remainingStock}</Text>
+          <Text style={styles.insightLabel}>Restants</Text>
+        </View>
+      </View>
+
+      <View style={styles.chartCard}>
+        <View style={styles.chartHeader}>
+          <Ionicons name="bar-chart" size={24} color="#764ba2" />
+          <Text style={styles.chartTitle}>Top Produits Vendus</Text>
+        </View>
+        <BarChart
+          data={productChartData}
+          barWidth={32}
+          spacing={24}
+          roundedTop
+          roundedBottom
+          showGradient
+          gradientColor="#764ba2"
+          frontColor="#764ba2"
+          height={200}
+          initialSpacing={10}
+          yAxisTextStyle={{ color: '#718096', fontSize: 12 }}
+          xAxisLabelTextStyle={{ color: '#718096', fontSize: 10 }}
+        />
+      </View>
+
+      {productStats.topProducts.length > 0 && (
+        <View style={styles.listCard}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="star" size={24} color="#FFD700" />
+            <Text style={styles.cardTitle}>Produits Performants</Text>
+          </View>
+          {productStats.topProducts.map((product, index) => (
+            <View key={product.product_variant?.id || index} style={styles.listItem}>
+              <View style={styles.productInfo}>
+                <View style={styles.productImagePlaceholder}>
+                  <Ionicons name="cube" size={20} color="#667eea" />
+                </View>
+                <View style={styles.productDetails}>
+                  <Text style={styles.productName} numberOfLines={1}>
+                    {product.product_name}
+                  </Text>
+                  <Text style={styles.productSku}>
+                    {product.product_variant?.product?.sku}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.productStats}>
+                <Text style={styles.productSold}>{product.soldQuantity} vendus</Text>
+                <Text style={styles.productRevenue}>
+                  {formatPrice((product.soldQuantity || 0) * (product.product_variant?.price || 0))}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+    </Animated.View>
+  );
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Chargement des données...</Text>
+        <Text style={styles.loadingText}>Chargement des rapports...</Text>
       </View>
     );
   }
 
   return (
-    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
-      {/* En-tête avec onglets */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Rapport des Ventes</Text>
-        <View style={styles.tabContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'overview' && styles.activeTab]}
-            onPress={() => setActiveTab('overview')}
-          >
-            <Text style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}>
-              Aperçu
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'clients' && styles.activeTab]}
-            onPress={() => setActiveTab('clients')}
-          >
-            <Text style={[styles.tabText, activeTab === 'clients' && styles.activeTabText]}>
-              Clients
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'products' && styles.activeTab]}
-            onPress={() => setActiveTab('products')}
-          >
-            <Text style={[styles.tabText, activeTab === 'products' && styles.activeTabText]}>
-              Produits
-            </Text>
+    <SafeAreaView style={styles.container}>
+      {/* En-tête avec dégradé */}
+      <LinearGradient
+        colors={['#667eea', '#764ba2']}
+        style={styles.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.headerContent}>
+          <View>
+            <Text style={styles.headerTitle}>📊 Rapports de Vente</Text>
+            <Text style={styles.headerSubtitle}>Analyse complète de vos performances</Text>
+          </View>
+          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
+            <Ionicons name="refresh" size={24} color="#FFF" />
           </TouchableOpacity>
         </View>
-      </View>
+
+        {/* Navigation par onglets */}
+        <View style={styles.tabContainer}>
+          {[
+            { key: 'overview', label: 'Aperçu', icon: 'grid' },
+            { key: 'clients', label: 'Clients', icon: 'people' },
+            { key: 'products', label: 'Produits', icon: 'cube' }
+          ].map((tab) => (
+            <TouchableOpacity 
+              key={tab.key}
+              style={[
+                styles.tab,
+                activeTab === tab.key && styles.activeTab
+              ]}
+              onPress={() => setActiveTab(tab.key)}
+            >
+              <Ionicons 
+                name={tab.icon} 
+                size={20} 
+                color={activeTab === tab.key ? '#FFF' : 'rgba(255,255,255,0.7)'} 
+              />
+              <Text style={[
+                styles.tabText,
+                activeTab === tab.key && styles.activeTabText
+              ]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </LinearGradient>
 
       <ScrollView
         style={styles.scrollView}
@@ -269,222 +685,24 @@ export default function SalesReportScreen() {
             refreshing={isRefreshing}
             onRefresh={onRefresh}
             colors={[COLORS.primary]}
+            tintColor={COLORS.primary}
           />
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Résumé général - visible uniquement dans l'onglet Aperçu */}
-        {activeTab === 'overview' && (
-          <>
-            <View style={styles.summaryCard}>
-              <View style={styles.cardHeader}>
-                <Ionicons name="trending-up" size={24} color={COLORS.primary} />
-                <Text style={styles.cardTitle}>Résumé du jour</Text>
-              </View>
+        {activeTab === 'overview' && renderOverviewTab()}
+        {activeTab === 'clients' && renderClientsTab()}
+        {activeTab === 'products' && renderProductsTab()}
 
-              <View style={styles.totalRevenueContainer}>
-                <Text style={styles.totalRevenueLabel}>Chiffre d'affaires total</Text>
-                <Text style={styles.totalRevenueAmount}>{formatPrice(summary.total_amounts)}</Text>
-              </View>
-
-              <View style={styles.summaryGrid}>
-                <View style={styles.summaryItem}>
-                  <View style={[styles.iconContainer, { backgroundColor: COLORS.primary + '20' }]}>
-                    <Ionicons name="cart" size={20} color={COLORS.primary} />
-                  </View>
-                  <Text style={styles.summaryNumber}>{summary.purchase_count}</Text>
-                  <Text style={styles.summaryLabel}>Achats</Text>
-                </View>
-                <View style={styles.summaryItem}>
-                  <View style={[styles.iconContainer, { backgroundColor: COLORS.success + '20' }]}>
-                    <Ionicons name="cash" size={20} color={COLORS.success} />
-                  </View>
-                  <Text style={styles.summaryNumber}>{summary.sales_count}</Text>
-                  <Text style={styles.summaryLabel}>Ventes</Text>
-                </View>
-                <View style={styles.summaryItem}>
-                  <View style={[styles.iconContainer, { backgroundColor: COLORS.accent + '20' }]}>
-                    <Ionicons name="cube" size={20} color={COLORS.accent} />
-                  </View>
-                  <Text style={styles.summaryNumber}>{summary.total_quantitys}</Text>
-                  <Text style={styles.summaryLabel}>Quantité vendue</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Graphique des revenus par zone */}
-            {zoneChartData && (
-              <View style={styles.chartCard}>
-                <View style={styles.cardHeader}>
-                  <Ionicons name="map" size={24} color={COLORS.primary} />
-                  <Text style={styles.cardTitle}>Revenus par zone</Text>
-                </View>
-                <BarChart
-                  data={zoneChartData}
-                  width={width - 64}
-                  height={220}
-                  yAxisLabel="FCFA "
-                  chartConfig={{
-                    backgroundColor: COLORS.surface,
-                    backgroundGradientFrom: COLORS.surface,
-                    backgroundGradientTo: COLORS.surface,
-                    decimalPlaces: 0,
-                    color: (opacity = 1) => `rgba(65, 105, 225, ${opacity})`,
-                    labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-                    style: {
-                      borderRadius: 16
-                    },
-                    propsForDots: {
-                      r: "6",
-                      strokeWidth: "2",
-                      stroke: COLORS.primary
-                    }
-                  }}
-                  style={styles.chart}
-                  verticalLabelRotation={30}
-                />
-              </View>
-            )}
-          </>
-        )}
-
-        {/* Statistiques clients - visible dans les onglets Aperçu et Clients */}
-        {(activeTab === 'overview' || activeTab === 'clients') && (
-          <View style={styles.clientStatsCard}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="people" size={24} color={COLORS.primary} />
-              <Text style={styles.cardTitle}>Collecte clients</Text>
-            </View>
-
-            <View style={styles.statsRow}>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{formatPrice(clientStats.totalClientRevenue)}</Text>
-                <Text style={styles.statLabel}>Revenus clients</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{formatPrice(clientStats.averageClientValue)}</Text>
-                <Text style={styles.statLabel}>Panier moyen</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{clientStats.totalClients}</Text>
-                <Text style={styles.statLabel}>Total clients</Text>
-              </View>
-            </View>
-
-            {clientStats.zoneStats.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>Répartition par zone</Text>
-                {clientStats.zoneStats.map((zoneStat, index) => (
-                  <View key={index} style={styles.zoneItem}>
-                    <View style={styles.zoneInfo}>
-                      <Text style={styles.zoneName}>{zoneStat.zone}</Text>
-                      <Text style={styles.zoneClients}>{zoneStat.count} client(s)</Text>
-                    </View>
-                    <Text style={styles.zoneRevenue}>{formatPrice(zoneStat.revenue)}</Text>
-                  </View>
-                ))}
-              </>
-            )}
-          </View>
-        )}
-
-        {/* Statistiques produits - visible dans les onglets Aperçu et Produits */}
-        {(activeTab === 'overview' || activeTab === 'products') && (
-          <View style={styles.productStatsCard}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="cube" size={24} color={COLORS.primary} />
-              <Text style={styles.cardTitle}>Vente de produits</Text>
-            </View>
-
-            <View style={styles.statsRow}>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{formatPrice(productStats.totalProductRevenue)}</Text>
-                <Text style={styles.statLabel}>Revenus produits</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{productStats.remainingStock}</Text>
-                <Text style={styles.statLabel}>Stock restant</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statValue}>{Math.round(productStats.sellRate)}%</Text>
-                <Text style={styles.statLabel}>Taux de vente</Text>
-              </View>
-            </View>
-
-            {/* Graphique des produits les plus vendus */}
-            {productChartData && activeTab === 'products' && (
-              <>
-                <Text style={styles.sectionTitle}>Top produits vendus</Text>
-                <BarChart
-                  data={productChartData}
-                  width={width - 64}
-                  height={220}
-                  chartConfig={{
-                    backgroundColor: COLORS.surface,
-                    backgroundGradientFrom: COLORS.surface,
-                    backgroundGradientTo: COLORS.surface,
-                    decimalPlaces: 0,
-                    color: (opacity = 1) => `rgba(46, 204, 113, ${opacity})`,
-                    labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-                    style: {
-                      borderRadius: 16
-                    }
-                  }}
-                  style={styles.chart}
-                  verticalLabelRotation={30}
-                />
-              </>
-            )}
-
-            {productStats.topProducts.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>Top produits vendus</Text>
-                {productStats.topProducts.map((product, index) => (
-                  <View key={product.id} style={styles.topProductItem}>
-                    <View style={[styles.rankBadge, 
-                      index === 0 && styles.firstRank,
-                      index === 1 && styles.secondRank,
-                      index === 2 && styles.thirdRank]}>
-                      <Text style={styles.rankText}>{index + 1}</Text>
-                    </View>
-                    <View style={styles.productInfo}>
-                      <Text style={styles.productName}>{product.name}</Text>
-                      <Text style={styles.productSold}>{product.soldQuantity} vendus</Text>
-                    </View>
-                    <Text style={styles.productRevenue}>
-                      {formatPrice(product.soldQuantity * product.unitPrice)}
-                    </Text>
-                  </View>
-                ))}
-              </>
-            )}
-          </View>
-        )}
-
-        {/* Actions - visible dans tous les onglets */}
-        <View style={styles.actionsCard}>
-          <Text style={styles.actionsTitle}>Actions</Text>
-          
-          <TouchableOpacity style={styles.exportButton}>
-            <Ionicons name="download-outline" size={20} color={COLORS.surface} />
-            <Text style={styles.exportButtonText}>Exporter le rapport</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.resetButton} onPress={resetData}>
-            <Ionicons name="refresh-outline" size={20} color={COLORS.error} />
-            <Text style={styles.resetButtonText}>Réinitialiser les données</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Dernière mise à jour */}
-        <View style={styles.lastUpdateCard}>
-          <Ionicons name="time-outline" size={16} color={COLORS.textLight} />
-          <Text style={styles.lastUpdateText}>
+        {/* Pied de page */}
+        <View style={styles.footer}>
+          <Ionicons name="information-circle" size={16} color={COLORS.textLight} />
+          <Text style={styles.footerText}>
             Dernière mise à jour: {formatDate(new Date().toISOString())}
           </Text>
         </View>
       </ScrollView>
-    </Animated.View>
+    </SafeAreaView>
   );
 }
 
@@ -505,262 +723,237 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
   },
   header: {
-    backgroundColor: COLORS.surface,
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingTop: 60,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 16,
-    textAlign: 'center',
+    color: '#FFF',
+    marginBottom: 4,
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  refreshButton: {
+    padding: 8,
   },
   tabContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 16,
+    padding: 4,
   },
   tab: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    marginHorizontal: 2,
   },
   activeTab: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   tabText: {
-    color: COLORS.textLight,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.7)',
+    marginLeft: 6,
   },
   activeTabText: {
-    color: COLORS.surface,
+    color: '#FFF',
   },
   scrollView: {
     flex: 1,
+  },
+  tabContent: {
     padding: 16,
   },
-  summaryCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: COLORS.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+  statsGrid: {
+    marginBottom: 20,
   },
-  clientStatsCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 20,
+  mainStatCard: {
+    borderRadius: 20,
+    padding: 24,
     marginBottom: 16,
-    shadowColor: COLORS.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  productStatsCard: {
+  statIconContainer: {
+    marginBottom: 16,
+  },
+  mainStatValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginBottom: 8,
+  },
+  mainStatLabel: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 4,
+  },
+  statSubtext: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  statsSubGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  statCard: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: COLORS.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  subStatCard: {
+    width: '48%',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  subStatValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  subStatLabel: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    textAlign: 'center',
+  },
+  chartsContainer: {
+    marginBottom: 20,
   },
   chartCard: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    shadowColor: COLORS.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  chartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  chartTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginLeft: 8,
+  },
+  chartRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  halfChart: {
+    width: '48%',
+  },
+  pieChartCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pieChartCenterText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+  },
+  pieChartCenterSubtext: {
+    fontSize: 12,
+    color: COLORS.textLight,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  insightCard: {
+    width: '32%',
     alignItems: 'center',
   },
-  chart: {
-    marginVertical: 8,
-    borderRadius: 16,
+  insightValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.text,
+    marginTop: 8,
+    marginBottom: 4,
   },
-  actionsCard: {
+  insightLabel: {
+    fontSize: 12,
+    color: COLORS.textLight,
+    textAlign: 'center',
+  },
+  listCard: {
     backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    shadowColor: COLORS.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  lastUpdateCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: COLORS.shadow,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowRadius: 8,
+    elevation: 4,
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   cardTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: COLORS.text,
-    marginLeft: 12,
+    marginLeft: 8,
   },
-  totalRevenueContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-    paddingVertical: 16,
-    backgroundColor: COLORS.primary + '10',
-    borderRadius: 12,
-  },
-  totalRevenueLabel: {
-    fontSize: 16,
-    color: COLORS.textLight,
-    marginBottom: 8,
-  },
-  totalRevenueAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
-  summaryGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  summaryItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  summaryNumber: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 4,
-  },
-  summaryLabel: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    textAlign: 'center',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  statBox: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 16,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    marginHorizontal: 4,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    textAlign: 'center',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 16,
-    marginTop: 8,
-  },
-  zoneItem: {
+  listItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: COLORS.background,
-    borderRadius: 8,
-    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  zoneInfo: {
-    flex: 1,
-  },
-  zoneName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  zoneClients: {
-    fontSize: 14,
-    color: COLORS.textLight,
-    marginTop: 2,
-  },
-  zoneRevenue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.success,
-  },
-  topProductItem: {
+  rankContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: COLORS.background,
-    borderRadius: 8,
-    marginBottom: 8,
+    flex: 1,
   },
   rankBadge: {
     width: 32,
     height: 32,
-    backgroundColor: COLORS.textLight,
     borderRadius: 16,
+    backgroundColor: COLORS.textLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -775,76 +968,94 @@ const styles = StyleSheet.create({
     backgroundColor: '#CD7F32',
   },
   rankText: {
-    color: COLORS.surface,
+    color: '#FFF',
     fontWeight: 'bold',
+    fontSize: 14,
+  },
+  clientInfo: {
+    flex: 1,
+  },
+  clientName: {
     fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  clientZone: {
+    fontSize: 14,
+    color: COLORS.textLight,
+  },
+  clientStats: {
+    alignItems: 'flex-end',
+  },
+  clientAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.success,
+    marginBottom: 2,
+  },
+  clientPhone: {
+    fontSize: 12,
+    color: COLORS.textLight,
   },
   productInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  productImagePlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  productDetails: {
     flex: 1,
   },
   productName: {
     fontSize: 16,
     fontWeight: '600',
     color: COLORS.text,
+    marginBottom: 2,
+  },
+  productSku: {
+    fontSize: 12,
+    color: COLORS.textLight,
+  },
+  productStats: {
+    alignItems: 'flex-end',
   },
   productSold: {
     fontSize: 14,
-    color: COLORS.textLight,
-    marginTop: 2,
+    color: COLORS.text,
+    marginBottom: 2,
   },
   productRevenue: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: COLORS.success,
   },
-  actionsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 16,
-  },
-  exportButton: {
-    backgroundColor: COLORS.primary,
+  footer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    shadowColor: COLORS.primary,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  exportButtonText: {
-    color: COLORS.surface,
-    fontWeight: 'bold',
-    marginLeft: 8,
-    fontSize: 16,
-  },
-  resetButton: {
+    padding: 20,
     backgroundColor: COLORS.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.error,
+    marginHorizontal: 16,
+    marginBottom: 20,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  resetButtonText: {
-    color: COLORS.error,
-    fontWeight: 'bold',
-    marginLeft: 8,
-    fontSize: 16,
-  },
-  lastUpdateText: {
+  footerText: {
     fontSize: 14,
     color: COLORS.textLight,
     marginLeft: 8,
-  }
+  },
 });
